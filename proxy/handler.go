@@ -7,6 +7,7 @@ package proxy
 
 import (
 	"context"
+	"fmt"
 	"io"
 
 	"google.golang.org/grpc"
@@ -81,6 +82,7 @@ func (s *handler) handler(srv interface{}, serverStream grpc.ServerStream) error
 	}
 
 	err = biDirCopy(serverStream, clientStream)
+	fmt.Println("zzzzzzzzzzzzzzzzz")
 	if err == io.EOF {
 		return nil
 	}
