@@ -7,10 +7,10 @@ package proxy
 
 import (
 	"context"
-	"fmt"
 	"io"
 
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/peer"
 )
@@ -62,17 +62,17 @@ type handler struct {
 // It is invoked like any gRPC server stream and uses the gRPC server framing to get and receive bytes from the wire,
 // forwarding it to a ClientStream established against the relevant ClientConn.
 func (s *handler) handler(srv interface{}, serverStream grpc.ServerStream) error {
-	serverCtx := serverStream.Context()
-	ss := grpc.ServerTransportStreamFromContext(serverCtx)
-	fullMethodName := ss.Method()
-	outCtx, backendConn, err := s.director.Connect(serverCtx, fullMethodName)
+	fullMethodName, ok := grpc.MethodFromServerStream(serverStream)
+	if !ok {
+		return grpc.Errorf(codes.Internal, "lowLevelServerStream not exists in context")
+	}
+	outCtx, backendConn, err := s.director.Connect(serverStream.Context(), fullMethodName)
 	if err != nil {
 		return err
 	}
 	defer s.director.Release(outCtx, backendConn)
 
 	clientCtx, clientCancel := context.WithCancel(outCtx)
-	defer clientCancel()
 	if _, ok := metadata.FromOutgoingContext(outCtx); !ok {
 		clientCtx = copyMetadata(clientCtx, outCtx)
 	}
@@ -81,12 +81,40 @@ func (s *handler) handler(srv interface{}, serverStream grpc.ServerStream) error
 		return err
 	}
 
-	err = biDirCopy(serverStream, clientStream)
-	fmt.Println("zzzzzzzzzzzzzzzzz")
-	if err == io.EOF {
-		return nil
+	// Explicitly *do not close* s2cErrChan and c2sErrChan, otherwise the select below will not terminate.
+	// Channels do not have to be closed, it is just a control flow mechanism, see
+	// https://groups.google.com/forum/#!msg/golang-nuts/pZwdYRGxCIk/qpbHxRRPJdUJ
+	s2cErrChan := s.forwardServerToClient(serverStream, clientStream)
+	c2sErrChan := s.forwardClientToServer(clientStream, serverStream)
+	// We don't know which side is going to stop sending first, so we need a select between the two.
+	for i := 0; i < 2; i++ {
+		select {
+		case s2cErr := <-s2cErrChan:
+			if s2cErr == io.EOF {
+				// this is the happy case where the sender has encountered io.EOF, and won't be sending anymore./
+				// the clientStream>serverStream may continue pumping though.
+				_ = clientStream.CloseSend()
+				break
+			} else {
+				// however, we may have gotten a receive error (stream disconnected, a read error etc) in which case we need
+				// to cancel the clientStream to the backend, let all of its goroutines be freed up by the CancelFunc and
+				// exit with an error to the stack
+				clientCancel()
+				return grpc.Errorf(codes.Internal, "failed proxying s2c: %v", s2cErr)
+			}
+		case c2sErr := <-c2sErrChan:
+			// This happens when the clientStream has nothing else to offer (io.EOF), returned a gRPC error. In those two
+			// cases we may have received Trailers as part of the call. In case of other errors (stream closed) the trailers
+			// will be nil.
+			serverStream.SetTrailer(clientStream.Trailer())
+			// c2sErr will contain RPC error from client code. If not io.EOF return the RPC error as server stream error.
+			if c2sErr != io.EOF {
+				return c2sErr
+			}
+			return nil
+		}
 	}
-	return err
+	return grpc.Errorf(codes.Internal, "gRPC proxying should never reach this stage.")
 }
 
 // copyMetadata takes the new client (outgoing) context, a server (incoming)
@@ -107,4 +135,58 @@ func copyMetadata(ctx context.Context, serverCtx context.Context) context.Contex
 		return metadata.NewOutgoingContext(ctx, metadata.Join(md, forwardMD))
 	}
 	return metadata.NewOutgoingContext(ctx, forwardMD)
+}
+
+func (s *handler) forwardClientToServer(src grpc.ClientStream, dst grpc.ServerStream) chan error {
+	ret := make(chan error, 1)
+	go func() {
+		f := &frame{}
+		for i := 0; ; i++ {
+			if i == 0 {
+				// Because sometimes the client will read the header first
+				// it is necessary to advance the header data exchange to recv.
+				// https://github.com/grpc/grpc-go/blob/master/examples/features/metadata/client/main.go#L212
+
+				// This is a bit of a hack, but client to server headers are only readable after first client msg is
+				// received but must be written to server stream before the first msg is flushed.
+				// This is the only place to do it nicely.
+				md, err := src.Header()
+				if err != nil {
+					ret <- err
+					break
+				}
+				if err := dst.SendHeader(md); err != nil {
+					ret <- err
+					break
+				}
+			}
+			if err := src.RecvMsg(f); err != nil {
+				ret <- err // this can be io.EOF which is happy case
+				break
+			}
+			if err := dst.SendMsg(f); err != nil {
+				ret <- err
+				break
+			}
+		}
+	}()
+	return ret
+}
+
+func (s *handler) forwardServerToClient(src grpc.ServerStream, dst grpc.ClientStream) chan error {
+	ret := make(chan error, 1)
+	go func() {
+		f := &frame{}
+		for i := 0; ; i++ {
+			if err := src.RecvMsg(f); err != nil {
+				ret <- err // this can be io.EOF which is happy case
+				break
+			}
+			if err := dst.SendMsg(f); err != nil {
+				ret <- err
+				break
+			}
+		}
+	}()
+	return ret
 }

@@ -5,6 +5,7 @@ package proxy_test
 
 import (
 	"context"
+	"fmt"
 	"io"
 	"log"
 	"net"
@@ -16,15 +17,12 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
-	"github.com/vgough/grpc-proxy/proxy"
+	"github.com/tsony-tsonev/grpc-proxy/proxy"
+	pb "github.com/tsony-tsonev/grpc-proxy/testservice"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/grpclog"
 	"google.golang.org/grpc/metadata"
-
-	"fmt"
-
-	pb "github.com/vgough/grpc-proxy/testservice"
 )
 
 const (
