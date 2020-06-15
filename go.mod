@@ -1,4 +1,4 @@
-module github.com/tsony-tsonev/grpc-proxy
+module github.com/taxime-hq/grpc-proxy
 
 go 1.13
 

@@ -9,7 +9,7 @@ import (
 	"context"
 	"strings"
 
-	"github.com/tsony-tsonev/grpc-proxy/proxy"
+	"github.com/taxime-hq/grpc-proxy/proxy"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/metadata"
