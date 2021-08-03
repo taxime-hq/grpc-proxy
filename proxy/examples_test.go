@@ -9,6 +9,8 @@ import (
 	"context"
 	"strings"
 
+	"google.golang.org/grpc/status"
+
 	"github.com/taxime-hq/grpc-proxy/proxy"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
@@ -21,7 +23,7 @@ var (
 
 func ExampleRegisterService() {
 	// A gRPC server with the proxying codec enabled.
-	server := grpc.NewServer(grpc.CustomCodec(proxy.Codec()))
+	server := grpc.NewServer()
 	// Register a TestService with 4 of its methods explicitly.
 	proxy.RegisterService(server, director,
 		"vgough.testproto.TestService",
@@ -30,7 +32,6 @@ func ExampleRegisterService() {
 
 func ExampleTransparentHandler() {
 	grpc.NewServer(
-		grpc.CustomCodec(proxy.Codec()),
 		grpc.UnknownServiceHandler(proxy.TransparentHandler(director)))
 }
 
@@ -49,14 +50,14 @@ func (d *ExampleDirector) Connect(ctx context.Context, method string) (context.C
 		// Decide on which backend to dial
 		if val, exists := md[":authority"]; exists && val[0] == "staging.api.example.com" {
 			// Make sure we use DialContext so the dialing can be cancelled/time out together with the context.
-			conn, err := grpc.DialContext(ctx, "api-service.staging.svc.local", grpc.WithCodec(proxy.Codec()))
+			conn, err := grpc.DialContext(ctx, "api-service.staging.svc.local", grpc.WithDefaultCallOptions(grpc.ForceCodec(proxy.Codec())))
 			return ctx, conn, err
 		} else if val, exists := md[":authority"]; exists && val[0] == "api.example.com" {
-			conn, err := grpc.DialContext(ctx, "api-service.prod.svc.local", grpc.WithCodec(proxy.Codec()))
+			conn, err := grpc.DialContext(ctx, "api-service.prod.svc.local", grpc.WithDefaultCallOptions(grpc.ForceCodec(proxy.Codec())))
 			return ctx, conn, err
 		}
 	}
-	return nil, nil, grpc.Errorf(codes.Unimplemented, "Unknown method")
+	return nil, nil, status.Errorf(codes.Unimplemented, "Unknown method")
 }
 
 func (d *ExampleDirector) Release(ctx context.Context, conn *grpc.ClientConn) {

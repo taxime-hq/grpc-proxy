@@ -1,38 +1,40 @@
 package proxy
 
 import (
-	"fmt"
-
 	"github.com/golang/protobuf/proto"
-	"google.golang.org/grpc"
+	"google.golang.org/grpc/encoding"
 )
 
-// Codec returns a proxying grpc.Codec with the default protobuf codec as parent.
+func init() {
+	encoding.RegisterCodec(Codec())
+}
+
+// Codec returns a proxying encoding.Codec with the default protobuf codec as parent.
 //
 // See CodecWithParent.
-func Codec() grpc.Codec {
+func Codec() encoding.Codec {
 	return CodecWithParent(&protoCodec{})
 }
 
-// CodecWithParent returns a proxying grpc.Codec with a user provided codec as parent.
+// CodecWithParent returns a proxying encoding.Codec with a user provided codec as parent.
 //
 // This codec is *crucial* to the functioning of the proxy. It allows the proxy server to be oblivious
 // to the schema of the forwarded messages. It basically treats a gRPC message frame as raw bytes.
 // However, if the server handler, or the client caller are not proxy-internal functions it will fall back
 // to trying to decode the message using a fallback codec.
-func CodecWithParent(fallback grpc.Codec) grpc.Codec {
+func CodecWithParent(fallback encoding.Codec) encoding.Codec {
 	return &rawCodec{fallback}
 }
 
 type rawCodec struct {
-	parentCodec grpc.Codec
+	parentCodec encoding.Codec
 }
-
-var _ grpc.Codec = &rawCodec{}
 
 type frame struct {
 	payload []byte
 }
+
+func (f *frame) ProtoMessage() {}
 
 func (c *rawCodec) Marshal(v interface{}) ([]byte, error) {
 	out, ok := v.(*frame)
@@ -40,7 +42,6 @@ func (c *rawCodec) Marshal(v interface{}) ([]byte, error) {
 		return c.parentCodec.Marshal(v)
 	}
 	return out.payload, nil
-
 }
 
 func (c *rawCodec) Unmarshal(data []byte, v interface{}) error {
@@ -52,14 +53,12 @@ func (c *rawCodec) Unmarshal(data []byte, v interface{}) error {
 	return nil
 }
 
-func (c *rawCodec) String() string {
-	return fmt.Sprintf("proxy>%s", c.parentCodec.String())
+func (c *rawCodec) Name() string {
+	return "proto"
 }
 
 // protoCodec is a Codec implementation with protobuf. It is the default rawCodec for gRPC.
 type protoCodec struct{}
-
-var _ grpc.Codec = &protoCodec{}
 
 func (protoCodec) Marshal(v interface{}) ([]byte, error) {
 	return proto.Marshal(v.(proto.Message))
@@ -69,6 +68,6 @@ func (protoCodec) Unmarshal(data []byte, v interface{}) error {
 	return proto.Unmarshal(data, v.(proto.Message))
 }
 
-func (protoCodec) String() string {
-	return "proto"
+func (protoCodec) Name() string {
+	return "proxy>proto"
 }

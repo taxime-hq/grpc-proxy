@@ -13,6 +13,7 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/peer"
+	"google.golang.org/grpc/status"
 )
 
 var (
@@ -64,7 +65,7 @@ type handler struct {
 func (s *handler) handler(srv interface{}, serverStream grpc.ServerStream) error {
 	fullMethodName, ok := grpc.MethodFromServerStream(serverStream)
 	if !ok {
-		return grpc.Errorf(codes.Internal, "lowLevelServerStream not exists in context")
+		return status.Errorf(codes.Internal, "lowLevelServerStream not exists in context")
 	}
 	outCtx, backendConn, err := s.director.Connect(serverStream.Context(), fullMethodName)
 	if err != nil {
@@ -114,7 +115,7 @@ func (s *handler) handler(srv interface{}, serverStream grpc.ServerStream) error
 			return nil
 		}
 	}
-	return grpc.Errorf(codes.Internal, "gRPC proxying should never reach this stage.")
+	return status.Errorf(codes.Internal, "gRPC proxying should never reach this stage.")
 }
 
 // copyMetadata takes the new client (outgoing) context, a server (incoming)

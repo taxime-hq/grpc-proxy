@@ -219,11 +219,10 @@ func (s *ProxyHappySuite) SetupSuite() {
 	pb.RegisterTestServiceServer(s.server, &assertingService{t: s.T()})
 
 	// Setup of the proxy's Director.
-	s.serverClientConn, err = grpc.Dial(s.serverListener.Addr().String(), grpc.WithInsecure(), grpc.WithCodec(proxy.Codec()))
+	s.serverClientConn, err = grpc.DialContext(context.Background(), s.serverListener.Addr().String(), grpc.WithDefaultCallOptions(grpc.ForceCodec(proxy.Codec())), grpc.WithInsecure())
 	require.NoError(s.T(), err, "must not error on deferred client Dial")
 	director := &checkingDirector{conn: s.serverClientConn}
 	s.proxy = grpc.NewServer(
-		grpc.CustomCodec(proxy.Codec()),
 		grpc.UnknownServiceHandler(proxy.TransparentHandler(director)),
 	)
 	// Ping handler is handled as an explicit registration and not as a TransparentHandler.
@@ -241,7 +240,8 @@ func (s *ProxyHappySuite) SetupSuite() {
 		s.proxy.Serve(s.proxyListener)
 	}()
 
-	clientConn, err := grpc.Dial(strings.Replace(s.proxyListener.Addr().String(), "127.0.0.1", "localhost", 1), grpc.WithInsecure(), grpc.WithTimeout(1*time.Second))
+	ctx, _ := context.WithTimeout(context.Background(), 1*time.Second)
+	clientConn, err := grpc.DialContext(ctx, strings.Replace(s.proxyListener.Addr().String(), "127.0.0.1", "localhost", 1), grpc.WithInsecure())
 	require.NoError(s.T(), err, "must not error on deferred client Dial")
 	s.testClient = pb.NewTestServiceClient(clientConn)
 }

@@ -7,7 +7,7 @@ Package proxy provides a gRPC proxy library.
 This package exposes a `StreamDirector` API that allows users of the package to
 implement arbitrary request routing logic.
 
-The implementation integrates with `grpc.Server`, allowing the StreamDirector to
+The implementation integrates with `encoding.Server`, allowing the StreamDirector to
 ### connect an incoming ServerStream to an outgoing ClientStream without encoding or
 decoding the messages. This allows the construction of forward and reverse gRPC
 proxies.
@@ -17,18 +17,18 @@ proxies.
 #### func  Codec
 
 ```go
-func Codec() grpc.Codec
+func Codec() encoding.Codec
 ```
-Codec returns a proxying grpc.Codec with the default protobuf codec as parent.
+Codec returns a proxying encoding.Codec with the default protobuf codec as parent.
 
 See CodecWithParent.
 
 #### func  CodecWithParent
 
 ```go
-func CodecWithParent(fallback grpc.Codec) grpc.Codec
+func CodecWithParent(fallback encoding.Codec) encoding.Codec
 ```
-CodecWithParent returns a proxying grpc.Codec with a user provided codec as
+CodecWithParent returns a proxying encoding.Codec with a user provided codec as
 parent.
 
 This codec is *crucial* to the functioning of the proxy. It allows the proxy
@@ -40,7 +40,7 @@ decode the message using a fallback codec.
 #### func  RegisterService
 
 ```go
-func RegisterService(server *grpc.Server, director StreamDirector, serviceName string, methodNames ...string)
+func RegisterService(server *encoding.Server, director StreamDirector, serviceName string, methodNames ...string)
 ```
 RegisterService sets up a proxy handler for a particular gRPC service and
 method. The behavior is the same as if you were registering a handler method,
@@ -52,12 +52,12 @@ ServerOption.
 #### func  TransparentHandler
 
 ```go
-func TransparentHandler(director StreamDirector) grpc.StreamHandler
+func TransparentHandler(director StreamDirector) encoding.StreamHandler
 ```
 TransparentHandler returns a handler that attempts to proxy all requests that
 are not registered in the server. The indented use here is as a transparent
 proxy, where the server doesn't know about the services implemented by the
-backends. It should be used as a `grpc.UnknownServiceHandler`.
+backends. It should be used as a `encoding.UnknownServiceHandler`.
 
 This can *only* be used if the `server` also uses proxy.CodecForServer()
 ServerOption.
@@ -75,7 +75,7 @@ type StreamDirector interface {
 	// Method is the gRPC request path, which is in the form "/service/method".
 	//
 	// The returned context is used as the basis for the outgoing connection.
-	Connect(ctx context.Context, method string) (context.Context, *grpc.ClientConn, error)
+	Connect(ctx context.Context, method string) (context.Context, *encoding.ClientConn, error)
 
 	// Release is called when a connection is longer being used.  This is called
 	// once for every call to Connect that does not return an error.
@@ -84,7 +84,7 @@ type StreamDirector interface {
 	//
 	// This can be used by the director to pool connections or close unused
 	// connections.
-	Release(ctx context.Context, conn *grpc.ClientConn)
+	Release(ctx context.Context, conn *encoding.ClientConn)
 }
 ```
 
