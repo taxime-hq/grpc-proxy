@@ -21,8 +21,10 @@ import (
 	pb "github.com/taxime-hq/grpc-proxy/testservice"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/grpclog"
 	"google.golang.org/grpc/metadata"
+	"google.golang.org/grpc/status"
 )
 
 const (
@@ -59,7 +61,7 @@ func (s *assertingService) Ping(ctx context.Context, ping *pb.PingRequest) (*pb.
 }
 
 func (s *assertingService) PingError(ctx context.Context, ping *pb.PingRequest) (*pb.Empty, error) {
-	return nil, grpc.Errorf(codes.FailedPrecondition, "Userspace error.")
+	return nil, status.Errorf(codes.FailedPrecondition, "Userspace error.")
 }
 
 func (s *assertingService) PingList(ping *pb.PingRequest, stream pb.TestService_PingListServer) error {
@@ -141,8 +143,8 @@ func (s *ProxyHappySuite) TestPingCarriesServerHeadersAndTrailers() {
 func (s *ProxyHappySuite) TestPingErrorPropagatesAppError() {
 	_, err := s.testClient.PingError(s.ctx(), &pb.PingRequest{Value: "foo"})
 	require.Error(s.T(), err, "PingError should never succeed")
-	assert.Equal(s.T(), codes.FailedPrecondition, grpc.Code(err))
-	assert.Equal(s.T(), "Userspace error.", grpc.ErrorDesc(err))
+	assert.Equal(s.T(), codes.FailedPrecondition, status.Code(err))
+	assert.Equal(s.T(), "Userspace error.", status.Convert(err).Message())
 }
 
 func (s *ProxyHappySuite) TestDirectorErrorIsPropagated() {
@@ -150,8 +152,8 @@ func (s *ProxyHappySuite) TestDirectorErrorIsPropagated() {
 	ctx := metadata.NewOutgoingContext(s.ctx(), metadata.Pairs(rejectingMdKey, "true"))
 	_, err := s.testClient.Ping(ctx, &pb.PingRequest{Value: "foo"})
 	require.Error(s.T(), err, "Director should reject this RPC")
-	assert.Equal(s.T(), codes.PermissionDenied, grpc.Code(err))
-	assert.Equal(s.T(), "testing rejection", grpc.ErrorDesc(err))
+	assert.Equal(s.T(), codes.PermissionDenied, status.Code(err))
+	assert.Equal(s.T(), "testing rejection", status.Convert(err).Message())
 }
 
 func (s *ProxyHappySuite) TestPingStream_FullDuplexWorks() {
@@ -196,7 +198,7 @@ func (c *checkingDirector) Connect(ctx context.Context, method string) (context.
 	md, ok := metadata.FromIncomingContext(ctx)
 	if ok {
 		if _, exists := md[rejectingMdKey]; exists {
-			return ctx, nil, grpc.Errorf(codes.PermissionDenied, "testing rejection")
+			return ctx, nil, status.Errorf(codes.PermissionDenied, "testing rejection")
 		}
 	}
 	return ctx, c.conn, nil
@@ -219,7 +221,7 @@ func (s *ProxyHappySuite) SetupSuite() {
 	pb.RegisterTestServiceServer(s.server, &assertingService{t: s.T()})
 
 	// Setup of the proxy's Director.
-	s.serverClientConn, err = grpc.DialContext(context.Background(), s.serverListener.Addr().String(), grpc.WithDefaultCallOptions(grpc.ForceCodec(proxy.Codec())), grpc.WithInsecure())
+	s.serverClientConn, err = grpc.NewClient(s.serverListener.Addr().String(), grpc.WithDefaultCallOptions(grpc.ForceCodec(proxy.Codec())), grpc.WithTransportCredentials(insecure.NewCredentials()))
 	require.NoError(s.T(), err, "must not error on deferred client Dial")
 	director := &checkingDirector{conn: s.serverClientConn}
 	s.proxy = grpc.NewServer(
@@ -240,8 +242,7 @@ func (s *ProxyHappySuite) SetupSuite() {
 		s.proxy.Serve(s.proxyListener)
 	}()
 
-	ctx, _ := context.WithTimeout(context.Background(), 1*time.Second)
-	clientConn, err := grpc.DialContext(ctx, strings.Replace(s.proxyListener.Addr().String(), "127.0.0.1", "localhost", 1), grpc.WithInsecure())
+	clientConn, err := grpc.NewClient(strings.Replace(s.proxyListener.Addr().String(), "127.0.0.1", "localhost", 1), grpc.WithTransportCredentials(insecure.NewCredentials()))
 	require.NoError(s.T(), err, "must not error on deferred client Dial")
 	s.testClient = pb.NewTestServiceClient(clientConn)
 }
